@@ -1,21 +1,8 @@
 #!/usr/bin/env bash
 
-# Archivos de datos
 declare -r ARCHIVO_PRODUCTOS="productos.tsv"
 declare -r ARCHIVO_USUARIOS="usuarios.tsv"
 declare -r ARCHIVO_REPORTE="productos.html"
-
-# Opciones de menú
-declare -r -i OPCION_ALTA=1
-declare -r -i OPCION_BAJA=2
-declare -r -i OPCION_MODIFICAR=3
-declare -r -i OPCION_MOSTRAR=4
-declare -r -i OPCION_REPORTAR=5
-declare -r -i OPCION_SALIR=6
-
-bienvenida() {
-    printf "Bienvenido/a al sistema de gestion\n\n"
-}
 
 inicializar_archivos() {
     [[ ! -f "$ARCHIVO_PRODUCTOS" ]] && touch "$ARCHIVO_PRODUCTOS"
@@ -23,15 +10,53 @@ inicializar_archivos() {
 }
 
 obtener_hash() {
-    local texto="$1"
-    local hash_out
-    hash_out=$(printf "%s" "$texto" | sha256sum | cut -d' ' -f1)
-    echo "$hash_out"
+    printf "%s" "$1" | sha256sum | cut -d' ' -f1
+}
+
+existe_usuario() {
+    local user_buscar="$1"
+    local user_file pass_hash
+    if [[ -f "$ARCHIVO_USUARIOS" ]]; then
+        while IFS=$'\t' read -r user_file pass_hash || [[ -n "$user_file" ]]; do
+            if [[ "$user_file" == "$user_buscar" ]]; then
+                return 0
+            fi
+        done < "$ARCHIVO_USUARIOS"
+    fi
+    return 1
+}
+
+existe_producto() {
+    local id_buscar="$1"
+    local id_f nom_f prec_f
+    if [[ -f "$ARCHIVO_PRODUCTOS" ]]; then
+        while IFS=$'\t' read -r id_f nom_f prec_f || [[ -n "$id_f" ]]; do
+            if [[ "$id_f" == "$id_buscar" ]]; then
+                return 0
+            fi
+        done < "$ARCHIVO_PRODUCTOS"
+    fi
+    return 1
+}
+
+obtener_siguiente_id() {
+    local max_id=0
+    local id_f nom_f prec_f
+    
+    if [[ -s "$ARCHIVO_PRODUCTOS" ]]; then
+        while IFS=$'\t' read -r id_f nom_f prec_f || [[ -n "$id_f" ]]; do
+            if [[ "$id_f" =~ ^[0-9]+$ ]] && (( id_f > max_id )); then
+                max_id=$id_f
+            fi
+        done < "$ARCHIVO_PRODUCTOS"
+    fi
+    
+    echo $((max_id + 1))
 }
 
 registrar_usuario() {
-    local user pass user_file pass_hash
-    printf "\n--- REGISTRO DE USUARIO ---\n"
+    local user pass
+    printf "\nREGISTRO DE USUARIO\n"
     read -rp "Ingrese nuevo nombre de usuario: " user
 
     if [[ -z "$user" ]]; then
@@ -39,13 +64,9 @@ registrar_usuario() {
         return
     fi
 
-    if [[ -f "$ARCHIVO_USUARIOS" ]]; then
-        while IFS=$'\t' read -r user_file pass_hash || [[ -n "$user_file" ]]; do
-            if [[ "$user_file" == "$user" ]]; then
-                printf "Error: El usuario '%s' ya existe.\n" "$user"
-                return
-            fi
-        done < "$ARCHIVO_USUARIOS"
+    if existe_usuario "$user"; then
+        printf "Error: El usuario '%s' ya existe.\n" "$user"
+        return
     fi
 
     read -rsp "Ingrese contraseña: " pass
@@ -59,7 +80,6 @@ registrar_usuario() {
     local hash_final
     hash_final=$(obtener_hash "$pass")
 
-    # Guardar credenciales separadas por TAB
     printf "%s\t%s\n" "$user" "$hash_final" >> "$ARCHIVO_USUARIOS"
     printf "Usuario '%s' registrado exitosamente.\n" "$user"
 }
@@ -68,7 +88,7 @@ iniciar_sesion() {
     local user pass user_file pass_hash
     declare -i intentos=0
 
-    printf "\n--- INICIO DE SESION ---\n"
+    printf "\nINICIO DE SESION\n"
 
     if [[ ! -s "$ARCHIVO_USUARIOS" ]]; then
         printf "No hay usuarios registrados en el sistema. Registre uno primero.\n"
@@ -103,70 +123,32 @@ iniciar_sesion() {
     return 1
 }
 
-menu_autenticacion() {
-    local opcion=""
-    while true; do
-        printf "\n--- AUTENTICACION ---\n"
-        printf "1. Iniciar sesion\n"
-        printf "2. Registrar usuario\n"
-        printf "3. Salir\n"
-        read -rp "Seleccione una opcion: " opcion
-
-        case $opcion in
-            1)
-                if iniciar_sesion; then
-                    return 0
-                fi
-                ;;
-            2)
-                registrar_usuario
-                ;;
-            3)
-                printf "Saliendo del sistema...\n"
-                exit 0
-                ;;
-            *)
-                printf "Opcion invalida.\n"
-                ;;
-        esac
-    done
-}
-
 alta_producto() {
-    local id nombre precio id_f nom_f prec_f
-    printf "\n--- ALTA DE PRODUCTO ---\n"
-    read -rp "Ingrese ID del producto: " id
+    local id nombre precio
+    printf "\nALTA DE PRODUCTO\n"
+    
+    id=$(obtener_siguiente_id)
+    printf "ID asignado automaticamente: %d\n" "$id"
+
     read -rp "Ingrese Nombre del producto: " nombre
     read -rp "Ingrese Precio del producto: " precio
 
-    if [[ -z "$id" || -z "$nombre" || -z "$precio" ]]; then
-        printf "Error: Todos los campos son obligatorios.\n"
+    if [[ -z "$nombre" || -z "$precio" ]]; then
+        printf "Error: El nombre y el precio son obligatorios.\n"
         return
     fi
 
-    # Validar si el ID ya existe
-    if [[ -f "$ARCHIVO_PRODUCTOS" ]]; then
-        while IFS=$'\t' read -r id_f nom_f prec_f || [[ -n "$id_f" ]]; do
-            if [[ "$id_f" == "$id" ]]; then
-                printf "Error: Ya existe un producto registrado con el ID '%s'.\n" "$id"
-                return
-            fi
-        done < "$ARCHIVO_PRODUCTOS"
-    fi
-
-    # Corrección: Tres especificadores %s\t%s\t%s para 3 variables
     printf "%s\t%s\t%s\n" "$id" "$nombre" "$precio" >> "$ARCHIVO_PRODUCTOS"
-    printf "Producto '%s' guardado correctamente.\n" "$nombre"
+    printf "Producto '%s' guardado correctamente con ID %d.\n" "$nombre" "$id"
 }
 
 baja_producto() {
     local id id_f nom_f prec_f
-    local encontrado=0
-    printf "\n--- BAJA DE PRODUCTO ---\n"
+    printf "\nBAJA DE PRODUCTO\n"
     read -rp "Ingrese ID del producto a eliminar: " id
 
-    if [[ ! -s "$ARCHIVO_PRODUCTOS" ]]; then
-        printf "No hay productos registrados.\n"
+    if ! existe_producto "$id"; then
+        printf "Error: No se encontro un producto con el ID '%s'.\n" "$id"
         return
     fi
 
@@ -174,50 +156,36 @@ baja_producto() {
     temp_file=$(mktemp)
 
     while IFS=$'\t' read -r id_f nom_f prec_f || [[ -n "$id_f" ]]; do
-        if [[ -z "$id_f" ]]; then
-            continue
-        fi
-        if [[ "$id_f" == "$id" ]]; then
-            encontrado=1
-        else
+        if [[ -n "$id_f" && "$id_f" != "$id" ]]; then
             printf "%s\t%s\t%s\n" "$id_f" "$nom_f" "$prec_f" >> "$temp_file"
         fi
     done < "$ARCHIVO_PRODUCTOS"
 
-    if (( encontrado == 1 )); then
-        mv "$temp_file" "$ARCHIVO_PRODUCTOS"
-        printf "Producto con ID '%s' eliminado correctamente.\n" "$id"
-    else
-        rm -f "$temp_file"
-        printf "Error: No se encontro un producto con el ID '%s'.\n" "$id"
-    fi
+    mv "$temp_file" "$ARCHIVO_PRODUCTOS"
+    printf "Producto con ID '%s' eliminado correctamente.\n" "$id"
 }
 
 modificar_producto() {
     local id nuevo_nombre nuevo_precio id_f nom_f prec_f
-    local encontrado=0
-    printf "\n--- MODIFICAR PRODUCTO ---\n"
+    printf "\nMODIFICAR PRODUCTO\n"
     read -rp "Ingrese ID del producto a modificar: " id
 
-    if [[ ! -s "$ARCHIVO_PRODUCTOS" ]]; then
-        printf "No hay productos registrados.\n"
+    if ! existe_producto "$id"; then
+        printf "Error: No se encontro un producto con el ID '%s'.\n" "$id"
         return
     fi
 
     local temp_file
     temp_file=$(mktemp)
 
-    # Se usa -u 3 para leer del File Descriptor 3, liberando el teclado
     while IFS=$'\t' read -r -u 3 id_f nom_f prec_f || [[ -n "$id_f" ]]; do
         if [[ -z "$id_f" ]]; then
             continue
         fi
         
         if [[ "$id_f" == "$id" ]]; then
-            encontrado=1
             printf "Producto encontrado: [%s] %s - $%s\n" "$id_f" "$nom_f" "$prec_f"
             
-            # Ahora este read sí leerá del teclado (stdin)
             read -rp "Ingrese nuevo Nombre (Dejar vacio para mantener '$nom_f'): " nuevo_nombre
             read -rp "Ingrese nuevo Precio (Dejar vacio para mantener '$prec_f'): " nuevo_precio
             
@@ -228,21 +196,15 @@ modificar_producto() {
         else
             printf "%s\t%s\t%s\n" "$id_f" "$nom_f" "$prec_f" >> "$temp_file"
         fi
-    # El archivo se redirige al File Descriptor 3
     done 3< "$ARCHIVO_PRODUCTOS"
 
-    if (( encontrado == 1 )); then
-        mv "$temp_file" "$ARCHIVO_PRODUCTOS"
-        printf "Producto ID '%s' modificado correctamente.\n" "$id"
-    else
-        rm -f "$temp_file"
-        printf "Error: No se encontro un producto con el ID '%s'.\n" "$id"
-    fi
+    mv "$temp_file" "$ARCHIVO_PRODUCTOS"
+    printf "Producto ID '%s' modificado correctamente.\n" "$id"
 }
 
 mostrar_productos() {
     local id_f nom_f prec_f
-    printf "\n--- LISTADO DE PRODUCTOS ---\n"
+    printf "\nLISTADO DE PRODUCTOS\n"
     
     if [[ ! -s "$ARCHIVO_PRODUCTOS" ]]; then
         printf "El inventario esta vacio.\n"
@@ -250,7 +212,7 @@ mostrar_productos() {
     fi
 
     printf "%-10s | %-20s | %-10s\n" "ID" "NOMBRE" "PRECIO"
-    printf "%s\n" "-------------------------------------------"
+    printf "%s\n" "..........................................."
     
     while IFS=$'\t' read -r id_f nom_f prec_f || [[ -n "$id_f" ]]; do
         if [[ -n "$id_f" ]]; then
@@ -304,16 +266,37 @@ generar_reporte_html() {
     printf "\nReporte HTML generado exitosamente en '%s'.\n" "$ARCHIVO_REPORTE"
 }
 
-main() {
-    inicializar_archivos
-    bienvenida
+flujo_principal() {
+    local opcion=""
+    local autenticado=0
 
-    menu_autenticacion
+    printf "Bienvenido/a al sistema de gestion\n"
 
-    local opcion=0
+    while (( autenticado == 0 )); do
+        printf "\nAUTENTICACION\n"
+        printf "1. Iniciar sesion\n"
+        printf "2. Registrar usuario\n"
+        printf "3. Salir\n"
+        read -rp "Seleccione una opcion: " opcion
 
-    while [[ "$opcion" != "$OPCION_SALIR" ]]; do
-        printf "\n--- MENU DE ACCIONES ---\n"
+        case $opcion in
+            1)
+                if iniciar_sesion; then
+                    autenticado=1
+                fi
+                ;;
+            2) registrar_usuario ;;
+            3)
+                printf "Saliendo del sistema...\n"
+                exit 0
+                ;;
+            *) printf "Opcion invalida.\n" ;;
+        esac
+    done
+
+    opcion=0
+    while [[ "$opcion" != "6" ]]; do
+        printf "\nMENU DE ACCIONES\n"
         printf "1. Alta producto\n"
         printf "2. Baja producto\n"
         printf "3. Modificar producto\n"
@@ -323,31 +306,20 @@ main() {
         read -rp "Opcion: " opcion
 
         case $opcion in
-            $OPCION_ALTA)
-                alta_producto
-                ;;
-            $OPCION_BAJA)
-                baja_producto
-                ;;
-            $OPCION_MODIFICAR)
-                modificar_producto
-                ;;
-            $OPCION_MOSTRAR)
-                mostrar_productos
-                ;;
-            $OPCION_REPORTAR)
-                generar_reporte_html
-                ;;
-            $OPCION_SALIR)
-                printf "\nSaliendo del programa...\n"
-                ;;
-            *)
-                printf "\nOpcion invalida.\n"
-                ;;
+            1) alta_producto ;;
+            2) baja_producto ;;
+            3) modificar_producto ;;
+            4) mostrar_productos ;;
+            5) generar_reporte_html ;;
+            6) printf "\nSaliendo del programa...\n" ;;
+            *) printf "\nOpcion invalida.\n" ;;
         esac
     done
+}
 
-    return 0
+main() {
+    inicializar_archivos
+    flujo_principal
 }
 
 main
